@@ -5,6 +5,7 @@
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "version.lib")
 
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #pragma comment(linker, "/SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup")
@@ -50,13 +51,54 @@ std::wstring GetShortcutArguments(const std::wstring& shortcutPath)
     return std::wstring(szArgs);
 }
 
-BOOL RunProcessAsAdmin(const std::wstring& path, const std::wstring& args)
+// New: Check if exe requires admin rights
+BOOL IsExeRequireAdmin(const std::wstring& exePath)
+{
+    DWORD dwSize = GetFileVersionInfoSizeW(exePath.c_str(), NULL);
+    if (dwSize == 0) return FALSE;
+
+    BYTE* pData = new BYTE[dwSize];
+    if (!GetFileVersionInfoW(exePath.c_str(), 0, dwSize, pData))
+    {
+        delete[] pData;
+        return FALSE;
+    }
+
+    VS_FIXEDFILEINFO* pFixedInfo = NULL;
+    UINT uLen = 0;
+    if (!VerQueryValueW(pData, L"\\", (void**)&pFixedInfo, &uLen))
+    {
+        delete[] pData;
+        return FALSE;
+    }
+
+    BOOL bRequireAdmin = FALSE;
+    wchar_t szSubBlock[256];
+    WORD langCode = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL);
+    WORD codepage = 1200;
+
+    wsprintfW(szSubBlock, L"\\StringFileInfo\\%04x%04x\\RequestedExecutionLevel", langCode, codepage);
+    wchar_t* pValue = NULL;
+    if (VerQueryValueW(pData, szSubBlock, (void**)&pValue, &uLen) && pValue)
+    {
+        if (_wcsicmp(pValue, L"requireAdministrator") == 0)
+        {
+            bRequireAdmin = TRUE;
+        }
+    }
+
+    delete[] pData;
+    return bRequireAdmin;
+}
+
+// Modified: Dynamic run with/without admin
+BOOL RunProcess(const std::wstring& path, const std::wstring& args, BOOL requireAdmin)
 {
     SHELLEXECUTEINFOW sei = { 0 };
     sei.cbSize = sizeof(SHELLEXECUTEINFOW);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
     sei.hwnd = NULL;
-    sei.lpVerb = L"runas";
+    sei.lpVerb = requireAdmin ? L"runas" : NULL;
     sei.lpFile = path.c_str();
     sei.lpParameters = args.c_str();
     sei.lpDirectory = NULL;
@@ -68,9 +110,14 @@ BOOL RunProcessAsAdmin(const std::wstring& path, const std::wstring& args)
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
-    CoInitialize(NULL);
+    HRESULT hrCoInit = CoInitialize(NULL);
+    if (FAILED(hrCoInit))
+    {
+        MessageBoxW(NULL, L"COM initialization failed", L"Error", MB_ICONERROR);
+        return 1;
+    }
 
-    const std::wstring shortcutPath = L"D:\\var\\Bandicam.lnk";
+    const std::wstring shortcutPath = L"D:\\var\\明日方舟-MuMu安卓设备.lnk";
 
     std::wstring targetPath = GetShortcutTarget(shortcutPath);
     std::wstring arguments = GetShortcutArguments(shortcutPath);
@@ -82,12 +129,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         return 1;
     }
 
-    if (!RunProcessAsAdmin(targetPath, arguments))
+    // New: Check admin requirement before run
+    BOOL bNeedAdmin = IsExeRequireAdmin(targetPath);
+    if (!RunProcess(targetPath, arguments, bNeedAdmin))
     {
         DWORD err = GetLastError();
         if (err != ERROR_CANCELLED)
         {
-            MessageBoxW(NULL, L"Failed to launch application", L"Error", MB_ICONERROR);
+            WCHAR errMsg[256];
+            wsprintfW(errMsg, L"Failed to launch application, error code: %d", err);
+            MessageBoxW(NULL, errMsg, L"Error", MB_ICONERROR);
         }
     }
 

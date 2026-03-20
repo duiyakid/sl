@@ -89,28 +89,33 @@ bool generate_launcher_code(const LnkInfo& lnk_info, const wchar_t* code_file_pa
     std::wstring arguments_escaped = escape_wstring(lnk_info.arguments);
     std::wstring work_dir_escaped = escape_wstring(lnk_info.work_dir);
 
+    // 核心修改：生成GUI程序（无控制台）+ 静默启动目标程序
     std::wstring cpp_code;
-    cpp_code += L"#include <iostream>\n";
+    // 1. 添加Windows GUI程序入口（替代控制台main）
     cpp_code += L"#include <Windows.h>\n";
-    cpp_code += L"#include <locale>\n";
-    cpp_code += L"#pragma comment(lib, \"shlwapi.lib\")\n\n";
-    cpp_code += L"int main() {\n";
-    cpp_code += L"    setlocale(LC_ALL, \"chs\");\n\n";
-    cpp_code += L"    const wchar_t* target_path = L\"" + target_path_escaped + L"\";\n";
-    cpp_code += L"    const wchar_t* arguments = L\"" + arguments_escaped + L"\";\n";
-    cpp_code += L"    const wchar_t* work_dir = L\"" + work_dir_escaped + L"\";\n";
+    cpp_code += L"#pragma comment(lib, \"shlwapi.lib\")\n";
+    cpp_code += L"#pragma comment(linker, \"/SUBSYSTEM:WINDOWS /ENTRY:WinMainCRTStartup\")\n\n";
+    // 2. WinMain为GUI程序入口，无控制台窗口
+    cpp_code += L"int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {\n";
+    cpp_code += L"    wchar_t target_path[] = L\"" + target_path_escaped + L"\";\n";
+    cpp_code += L"    wchar_t arguments[] = L\"" + arguments_escaped + L"\";\n";
+    cpp_code += L"    wchar_t work_dir[] = L\"" + work_dir_escaped + L"\";\n";
     cpp_code += L"    DWORD show_cmd = " + std::to_wstring(lnk_info.show_cmd) + L";\n\n";
+    // 3. 拼接命令行（兼容带参数的情况）
     cpp_code += L"    wchar_t cmd_line[MAX_PATH * 2] = {0};\n";
     cpp_code += L"    wcscpy_s(cmd_line, target_path);\n";
     cpp_code += L"    if (wcslen(arguments) > 0) {\n";
     cpp_code += L"        wcscat_s(cmd_line, L\" \");\n";
     cpp_code += L"        wcscat_s(cmd_line, arguments);\n";
     cpp_code += L"    }\n\n";
+    // 4. 静默启动配置：隐藏启动器自身窗口，正常显示目标程序
     cpp_code += L"    STARTUPINFOW si = {0};\n";
     cpp_code += L"    si.cb = sizeof(si);\n";
     cpp_code += L"    si.wShowWindow = static_cast<WORD>(show_cmd);\n";
+    cpp_code += L"    si.dwFlags = STARTF_USESHOWWINDOW;\n"; // 启用窗口显示配置
     cpp_code += L"    PROCESS_INFORMATION pi = {0};\n\n";
-    cpp_code += L"    BOOL launch_ok = CreateProcessW(\n";
+    // 5. 启动目标程序（无任何输出/暂停）
+    cpp_code += L"    CreateProcessW(\n";
     cpp_code += L"        nullptr,\n";
     cpp_code += L"        cmd_line,\n";
     cpp_code += L"        nullptr,\n";
@@ -122,15 +127,13 @@ bool generate_launcher_code(const LnkInfo& lnk_info, const wchar_t* code_file_pa
     cpp_code += L"        &si,\n";
     cpp_code += L"        &pi\n";
     cpp_code += L"    );\n\n";
-    cpp_code += L"    if (launch_ok) {\n";
-    cpp_code += L"        CloseHandle(pi.hProcess);\n";
-    cpp_code += L"        CloseHandle(pi.hThread);\n";
-    cpp_code += L"    } else {\n";
-    cpp_code += L"        system(\"pause\");\n";
-    cpp_code += L"    }\n\n";
+    // 6. 释放句柄后立即退出，无任何弹窗/暂停
+    cpp_code += L"    if (pi.hProcess != nullptr) CloseHandle(pi.hProcess);\n";
+    cpp_code += L"    if (pi.hThread != nullptr) CloseHandle(pi.hThread);\n";
     cpp_code += L"    return 0;\n";
     cpp_code += L"}\n";
 
+    // 转换为UTF-8写入
     int utf8_len = WideCharToMultiByte(CP_UTF8, 0, cpp_code.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string utf8_code(utf8_len, 0);
     WideCharToMultiByte(CP_UTF8, 0, cpp_code.c_str(), -1, &utf8_code[0], utf8_len, nullptr, nullptr);
@@ -149,18 +152,14 @@ bool generate_launcher_code(const LnkInfo& lnk_info, const wchar_t* code_file_pa
 }
 
 bool compile_launcher(const wchar_t* code_file_path, const wchar_t* exe_file_path) {
-    // 核心修复：
-    // 1. /Fo参数末尾不加反斜杠，改用具体文件名（避免转义问题）
-    // 2. 统一参数顺序，确保源文件路径被正确识别
+    // 编译命令：指定SUBSYSTEM为WINDOWS（GUI程序），无控制台
     std::wstring compile_cmd = L"cl /EHsc /W3 /utf-8 ";
-    // 修复1：/Fo指定具体obj文件名，避免反斜杠转义引号
     compile_cmd += L"/Fo\"D:\\var\\launcher.obj\" ";
     compile_cmd += L"/Fd\"D:\\var\\launcher.pdb\" ";
-    // 修复2：源文件路径放在参数中间，确保编译器识别
     compile_cmd += L"\"" + std::wstring(code_file_path) + L"\" ";
     compile_cmd += L"/Fe:\"" + std::wstring(exe_file_path) + L"\" ";
-    // 修复3：强制指定编译为x64（匹配VS工具链）
-    compile_cmd += L"/machine:x64";
+    compile_cmd += L"/machine:x64 ";
+    compile_cmd += L"/link /SUBSYSTEM:WINDOWS"; // 强制编译为GUI程序
 
     std::wcout << L"\n开始编译独立EXE，命令：" << compile_cmd << std::endl;
     int compile_result = _wsystem(compile_cmd.c_str());
@@ -171,7 +170,7 @@ bool compile_launcher(const wchar_t* code_file_path, const wchar_t* exe_file_pat
     }
     else {
         std::cerr << "\n编译失败！请确保：" << std::endl;
-        std::cerr << "1. 已打开\"x64 Native Tools Command Prompt for VS\"（非x86）" << std::endl;
+        std::cerr << "1. 已打开\"x64 Native Tools Command Prompt for VS\"" << std::endl;
         std::cerr << "2. cl.exe能在命令行中正常调用" << std::endl;
         std::cerr << "3. D:\\var目录有读写权限" << std::endl;
         return false;
@@ -187,7 +186,7 @@ int main() {
         return -1;
     }
 
-    const wchar_t* test_lnk_path = L"D:\\var\\明日方舟-MuMu安卓设备.lnk";
+    const wchar_t* test_lnk_path = L"D:\\var\\Bandicam.lnk";
     LnkInfo lnk_data;
 
     if (parse_lnk_file(test_lnk_path, lnk_data)) {
@@ -198,7 +197,7 @@ int main() {
         std::wcout << L"窗口显示方式：" << lnk_data.show_cmd << std::endl;
 
         const wchar_t* launcher_code_path = L"D:\\var\\launcher.cpp";
-        const wchar_t* final_exe_path = L"D:\\var\\明日方舟启动器.exe";
+        const wchar_t* final_exe_path = L"D:\\var\\bandi.exe";
 
         if (generate_launcher_code(lnk_data, launcher_code_path)) {
             compile_launcher(launcher_code_path, final_exe_path);

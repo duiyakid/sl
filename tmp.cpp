@@ -70,7 +70,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    const std::wstring targetPath = L"D:\\Software\\Soundpad\\Soundpad.exe";
+    const std::wstring targetPath = L"D:\\Software\\MCHOSE HUB\\MCHOSE HUB.exe";
     const std::wstring arguments = L"";
 
     if (targetPath.empty()) {

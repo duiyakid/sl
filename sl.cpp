@@ -1,99 +1,140 @@
 ﻿#include <windows.h>
 #include <iostream>
 #include <string>
-#include <unordered_map>
-#include <stdexcept>
-#include <stdio.h>      // 基础输入输出
-#include <wchar.h>      // 宽字符处理
-#include <io.h>         // _setmode 函数
-#include <fcntl.h>      // _O_U16TEXT 宏
+#include <vector>
+#include <fstream>
+#include <stdio.h>      
+#include <wchar.h>      
+#include <io.h>         
+#include <fcntl.h>      
 
+// 提取文件名
 std::wstring get_file_name(std::wstring path) {
-
     std::wstring new_name = path.substr(path.find_last_of(L"\\/") + 1);
-    // 第二步：找到最后一个"."的位置，删掉后面的扩展名
-    size_t dot_pos = new_name.rfind(L'.');  // 找最后一个点
-    if (dot_pos != std::wstring::npos)      // 如果找到点
-        new_name = new_name.substr(0, dot_pos);  // 只保留点前面的部分
+    size_t dot_pos = new_name.rfind(L'.');
+    if (dot_pos != std::wstring::npos)
+        new_name = new_name.substr(0, dot_pos);
     return new_name;
 }
 
-// ========== 新增：获取配置文件路径 ==========
-// 配置文件和sl.exe同目录，名称为sl_config.ini
+// 配置文件路径：当前目录的sl_config.txt（无任何路径陷阱）
 std::wstring get_config_path() {
-    // 直接返回当前目录的sl_config.ini（无需找exe路径）
-    return L"sl_config.ini";
+    return L"sl_config.txt";
 }
 
-bool check_and_create_config() {
-    std::wstring configPath = get_config_path();
-
-    // 1. 检查文件是否存在（当前目录）
-    DWORD fileAttr = GetFileAttributesW(configPath.c_str());
-    if (fileAttr != INVALID_FILE_ATTRIBUTES) {
-        wprintf(L"[INFO] 配置文件已存在（当前目录）：%ls\n", configPath.c_str());
+// 检查并创建配置文件
+bool check_config() {
+    std::wstring cfg = get_config_path();
+    if (_waccess(cfg.c_str(), 0) == 0) {
+        wprintf(L"[INFO] 配置文件已存在：%ls\n", cfg.c_str());
         return true;
     }
-
-    // 2. 文件不存在，创建空配置文件（当前目录）
-    HANDLE hFile = CreateFileW(
-        configPath.c_str(),          // 当前目录的sl_config.ini
-        GENERIC_WRITE,               // 写入权限
-        FILE_SHARE_READ,             // 允许其他程序读取
-        NULL,                        // 默认安全属性
-        CREATE_NEW,                  // 仅新建（避免覆盖）
-        FILE_ATTRIBUTE_NORMAL,       // 普通文件
-        NULL
-    );
-
-    if (hFile == INVALID_HANDLE_VALUE) {
-        wprintf(L"[ERROR] 新建配置文件失败（当前目录）！错误码：%d\n", GetLastError());
-        return false;
-    }
-
-    // 3. 关闭文件句柄
-    CloseHandle(hFile);
-    wprintf(L"[INFO] 配置文件已新建（当前目录）：%ls\n", configPath.c_str());
+    // 新建空文件
+    std::wofstream f(cfg);
+    f.close();
+    wprintf(L"[INFO] 配置文件已新建：%ls\n", cfg.c_str());
     return true;
 }
-// ========== wmain入口 ==========
+
+// 写入记录：纯文本，格式「软件名|路径」
+bool write_soft(const std::wstring& name, const std::wstring& path) {
+    std::wstring cfg = get_config_path();
+    // 先读原有内容，去重
+    std::vector<std::pair<std::wstring, std::wstring>> list;
+    std::wifstream in(cfg);
+    if (in.is_open()) {
+        std::wstring line;
+        while (std::getline(in, line)) {
+            size_t sep = line.find(L'|');
+            if (sep == std::wstring::npos) continue;
+            std::wstring n = line.substr(0, sep);
+            std::wstring p = line.substr(sep + 1);
+            if (n != name) list.push_back({ n, p });
+        }
+        in.close();
+    }
+    // 追加新记录
+    list.push_back({ name, path });
+    // 写入文件
+    std::wofstream out(cfg, std::ios::trunc);
+    if (!out.is_open()) {
+        wprintf(L"[❌] 写入失败！请以管理员运行\n");
+        return false;
+    }
+    for (auto& pair : list) {
+        out << pair.first << L"|" << pair.second << L"\n";
+    }
+    out.close();
+    wprintf(L"[✅] 写入成功：%ls → %ls\n", name.c_str(), path.c_str());
+    return true;
+}
+
+// 读取记录：纯文本解析
+void read_soft() {
+    std::wstring cfg = get_config_path();
+    std::vector<std::pair<std::wstring, std::wstring>> list;
+    std::wifstream in(cfg);
+    if (!in.is_open()) {
+        wprintf(L"[ERROR] 读取失败！\n");
+        return;
+    }
+    std::wstring line;
+    while (std::getline(in, line)) {
+        size_t sep = line.find(L'|');
+        if (sep == std::wstring::npos) continue;
+        std::wstring n = line.substr(0, sep);
+        std::wstring p = line.substr(sep + 1);
+        list.push_back({ n, p });
+    }
+    in.close();
+
+    // 展示
+    wprintf(L"\n==================== 软件列表 ====================\n");
+    if (list.empty()) {
+        wprintf(L"               暂无记录\n");
+    }
+    else {
+        int i = 1;
+        for (auto& pair : list) {
+            wprintf(L"%d. 名称：%ls\n   路径：%ls\n", i++, pair.first.c_str(), pair.second.c_str());
+        }
+    }
+    wprintf(L"==================================================\n");
+    wprintf(L"总计：%zd 条\n", list.size());
+}
+
+// 主函数
 int wmain(int argc, wchar_t* argv[])
 {
-    SetConsoleOutputCP(CP_UTF8);                  // 控制台输出代码页设为UTF-8
-    int rec = _setmode(_fileno(stdout), _O_U16TEXT);        // 标准输出设为宽字符模式
-    
-    check_and_create_config();
+    SetConsoleOutputCP(CP_UTF8);
+    _setmode(_fileno(stdout), _O_U16TEXT);
+
+    check_config();
 
     if (argc < 2) {
-        wprintf(L"[ERROR] 缺少命令参数！\n");
-        wprintf(L"用法：\n");
-        wprintf(L"  sl2 -a <lnk路径> [新exe名]  # 生成exe\n");
-        wprintf(L"  sl2 -s                      # 查看记录\n");
+        wprintf(L"用法：\n  sl -a <lnk路径> [软件名]\n  sl -s\n");
         return -1;
     }
 
-    std::wstring opt;
-    std::wstring para;
-    opt = argv[1];
-    if(argc>2) para = argv[2];
-    std::wstring new_name;
-    std::wstring cmd;
-    if (opt == L"-a" && argc>2) {
-        cmd += L"l2e.exe \"";
-        cmd += para;
-        cmd += L"\" ";
-        if (argc > 3) {
-            new_name = argv[3];
-        }
-        else {
-            new_name = get_file_name(para);
-        }
-        cmd += new_name;
-        _wsystem(cmd.c_str());
+    std::wstring opt = argv[1];
+    // 查看记录
+    if (opt == L"-s") {
+        read_soft();
+        return 0;
     }
-    
-        
-    return 0;
-    
-}
+    // 写入记录
+    if (opt == L"-a" && argc > 2) {
+        std::wstring path = argv[2];
+        std::wstring name = (argc > 3) ? argv[3] : get_file_name(path);
+        // 执行l2e.exe
+        std::wstring cmd = L"l2e.exe \"" + path + L"\" " + name;
+        wprintf(L"[INFO] 执行：%ls\n", cmd.c_str());
+        _wsystem(cmd.c_str());
+        // 写入配置
+        write_soft(name, path);
+        return 0;
+    }
 
+    wprintf(L"无效命令！\n");
+    return -1;
+}

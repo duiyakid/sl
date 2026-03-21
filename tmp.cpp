@@ -70,7 +70,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    const std::wstring targetPath = L"D:\\Software\\MCHOSE HUB\\MCHOSE HUB.exe";
+    const std::wstring targetPath = L"C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE";
     const std::wstring arguments = L"";
 
     if (targetPath.empty()) {

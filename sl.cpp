@@ -13,7 +13,7 @@
 #pragma comment(lib, "ole32.lib") // CoInitialize需要
 
 // ========== 工具函数 ==========
-// 1. 修复：正确提取LNK快捷方式的真实EXE目标路径
+// 1. 正确提取LNK快捷方式的真实EXE目标路径
 std::wstring get_lnk_target_path(const std::wstring& lnk_path) {
     WCHAR szTargetPath[MAX_PATH * 2] = { 0 }; // 扩大缓冲区，避免路径截断
     IShellLinkW* pShellLink = NULL;
@@ -25,7 +25,7 @@ std::wstring get_lnk_target_path(const std::wstring& lnk_path) {
         return L"";
     }
 
-    // 1. 创建IShellLink实例
+    // 创建IShellLink实例
     hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
         IID_IShellLinkW, (LPVOID*)&pShellLink);
     if (FAILED(hr)) {
@@ -34,7 +34,7 @@ std::wstring get_lnk_target_path(const std::wstring& lnk_path) {
         return L"";
     }
 
-    // 2. 查询IPersistFile接口（用于加载LNK文件）
+    // 查询IPersistFile接口
     hr = pShellLink->QueryInterface(IID_IPersistFile, (LPVOID*)&pPersistFile);
     if (FAILED(hr)) {
         wprintf(L"[ERROR] 获取PersistFile接口失败！错误码：%08X\n", hr);
@@ -43,7 +43,7 @@ std::wstring get_lnk_target_path(const std::wstring& lnk_path) {
         return L"";
     }
 
-    // 3. 加载LNK文件（必须用WCHAR，支持中文路径）
+    // 加载LNK文件
     hr = pPersistFile->Load(lnk_path.c_str(), STGM_READ);
     if (FAILED(hr)) {
         wprintf(L"[ERROR] 加载LNK文件失败！请检查路径是否正确，错误码：%08X\n", hr);
@@ -53,7 +53,7 @@ std::wstring get_lnk_target_path(const std::wstring& lnk_path) {
         return L"";
     }
 
-    // 4. 修复核心：获取完整的目标路径（SLGP_RAWPATH=原始路径，不简化）
+    // 获取完整的目标路径（SLGP_RAWPATH=原始路径）
     hr = pShellLink->GetPath(szTargetPath, MAX_PATH * 2, NULL, SLGP_RAWPATH);
     if (FAILED(hr)) {
         wprintf(L"[ERROR] 提取LNK目标路径失败！错误码：%08X\n", hr);
@@ -68,7 +68,6 @@ std::wstring get_lnk_target_path(const std::wstring& lnk_path) {
     pShellLink->Release();
     CoUninitialize();
 
-    // 返回真实的EXE路径
     return szTargetPath;
 }
 
@@ -101,60 +100,19 @@ std::wstring get_config_path() {
 bool check_config() {
     std::wstring cfg = get_config_path();
     if (_waccess(cfg.c_str(), 0) == 0) {
-        wprintf(L"[INFO] 配置文件已存在：%ls\n", cfg.c_str());
         return true;
     }
     // 新建空文件
     std::wofstream f(cfg);
     f.close();
-    wprintf(L"[INFO] 配置文件已新建：%ls\n", cfg.c_str());
     return true;
 }
 
-// 写入记录：存储「文件名|EXE目标路径」
-bool write_soft(const std::wstring& name, const std::wstring& exe_path) {
-    if (name.empty() || exe_path.empty()) {
-        wprintf(L"[ERROR] 文件名或EXE路径为空，写入失败！\n");
-        return false;
-    }
-
-    std::wstring cfg = get_config_path();
-    // 读取原有记录（去重）
+// 读取所有记录（供添加/删除/查看使用）
+std::vector<std::pair<std::wstring, std::wstring>> read_all_soft() {
     std::vector<std::pair<std::wstring, std::wstring>> list;
-    std::wifstream in(cfg);
-    if (in.is_open()) {
-        std::wstring line;
-        while (std::getline(in, line)) {
-            size_t sep = line.find(L'|');
-            if (sep == std::wstring::npos) continue;
-            std::wstring n = line.substr(0, sep);
-            std::wstring p = line.substr(sep + 1);
-            if (n != name) list.push_back({ n, p }); // 去重：跳过同名
-        }
-        in.close();
-    }
-    // 添加新记录
-    list.push_back({ name, exe_path });
-    // 写入文件
-    std::wofstream out(cfg, std::ios::trunc);
-    if (!out.is_open()) {
-        wprintf(L"[❌] 写入配置文件失败！请以管理员身份运行\n");
-        return false;
-    }
-    for (auto& pair : list) {
-        out << pair.first << L"|" << pair.second << L"\n";
-    }
-    out.close();
-    wprintf(L"[✅] 已记录软件：%ls → %ls\n", name.c_str(), exe_path.c_str());
-    return true;
-}
-
-// 读取记录并表格化展示（序号 | 文件名 | EXE路径）
-void show_soft_table() {
     std::wstring cfg = get_config_path();
-    std::vector<std::pair<std::wstring, std::wstring>> list;
 
-    // 读取记录
     std::wifstream in(cfg);
     if (in.is_open()) {
         std::wstring line;
@@ -167,14 +125,95 @@ void show_soft_table() {
         }
         in.close();
     }
+    return list;
+}
 
-    // 表格化展示
+// 写入所有记录（覆盖式写入）
+bool write_all_soft(const std::vector<std::pair<std::wstring, std::wstring>>& list) {
+    std::wstring cfg = get_config_path();
+    std::wofstream out(cfg, std::ios::trunc);
+    if (!out.is_open()) {
+        wprintf(L"[❌] 写入配置文件失败！请以管理员身份运行\n");
+        return false;
+    }
+    for (auto& pair : list) {
+        out << pair.first << L"|" << pair.second << L"\n";
+    }
+    out.close();
+    return true;
+}
+
+// 添加记录：存储「文件名|EXE目标路径」
+bool add_soft(const std::wstring& name, const std::wstring& exe_path) {
+    if (name.empty() || exe_path.empty()) {
+        wprintf(L"[ERROR] 文件名或EXE路径为空，添加失败！\n");
+        return false;
+    }
+
+    // 读取原有记录（去重）
+    std::vector<std::pair<std::wstring, std::wstring>> list = read_all_soft();
+    std::vector<std::pair<std::wstring, std::wstring>> new_list;
+    // 保留非同名记录
+    for (auto& pair : list) {
+        if (pair.first != name) {
+            new_list.push_back(pair);
+        }
+    }
+    // 添加新记录
+    new_list.push_back({ name, exe_path });
+
+    // 写入文件
+    if (write_all_soft(new_list)) {
+        wprintf(L"[✅] 已添加记录：%ls → %ls\n", name.c_str(), exe_path.c_str());
+        return true;
+    }
+    return false;
+}
+
+// 删除记录：按文件名删除
+bool delete_soft(const std::wstring& name) {
+    if (name.empty()) {
+        wprintf(L"[ERROR] 请指定要删除的文件名！\n");
+        return false;
+    }
+
+    // 读取原有记录
+    std::vector<std::pair<std::wstring, std::wstring>> list = read_all_soft();
+    std::vector<std::pair<std::wstring, std::wstring>> new_list;
+    bool found = false;
+
+    // 过滤要删除的记录
+    for (auto& pair : list) {
+        if (pair.first == name) {
+            found = true; // 标记找到该记录
+            continue;     // 跳过（即删除）
+        }
+        new_list.push_back(pair);
+    }
+
+    if (!found) {
+        wprintf(L"[❌] 删除失败！未找到文件名「%ls」的记录\n", name.c_str());
+        return false;
+    }
+
+    // 写入过滤后的记录
+    if (write_all_soft(new_list)) {
+        wprintf(L"[✅] 已成功删除文件名「%ls」的记录\n", name.c_str());
+        return true;
+    }
+    return false;
+}
+
+// 表格化展示所有记录
+void show_soft_table() {
+    std::vector<std::pair<std::wstring, std::wstring>> list = read_all_soft();
+
     wprintf(L"\n==================== 已记录的软件列表 ====================\n");
     // 表头：序号  文件名          EXE路径
     wprintf(L"%ls\t%ls\t%ls\n",
-        pad_space(L"序号", 2).c_str(),       // 序号列（占2位）
-        pad_space(L"文件名", 10).c_str(),    // 文件名列（占10位）
-        L"EXE路径");                         // EXE路径列
+        pad_space(L"序号", 2).c_str(),
+        pad_space(L"文件名", 10).c_str(),
+        L"EXE路径");
 
     if (list.empty()) {
         wprintf(L"%ls\t%ls\t%ls\n",
@@ -184,12 +223,11 @@ void show_soft_table() {
     }
     else {
         for (int i = 0; i < list.size(); i++) {
-            // 行内容：序号  文件名（补空格）  EXE路径
             std::wstring idx = std::to_wstring(i + 1);
             wprintf(L"%ls\t%ls\t%ls\n",
-                pad_space(idx, 2).c_str(),       // 序号
-                pad_space(list[i].first, 10).c_str(),  // 文件名（对齐）
-                list[i].second.c_str());         // EXE路径
+                pad_space(idx, 2).c_str(),
+                pad_space(list[i].first, 10).c_str(),
+                list[i].second.c_str());
         }
     }
     wprintf(L"==========================================================\n");
@@ -209,25 +247,27 @@ int wmain(int argc, wchar_t* argv[])
     // 参数检查
     if (argc < 2) {
         wprintf(L"[ERROR] 缺少命令参数！\n");
-        wprintf(L"用法：\n");
-        wprintf(L"  sl -a <lnk快捷方式路径> [自定义文件名]\n");
-        wprintf(L"  sl -s                      查看所有记录\n");
+        wprintf(L"支持的命令：\n");
+        wprintf(L"  1. 添加记录：sl -a <lnk快捷方式路径> [自定义文件名]\n");
+        wprintf(L"  2. 查看记录：sl -s\n");
+        wprintf(L"  3. 删除记录：sl -d <要删除的文件名>\n");
         return -1;
     }
 
     std::wstring opt = argv[1];
+
     // 功能1：-s 查看表格化记录
     if (opt == L"-s") {
         show_soft_table();
         return 0;
     }
 
-    // 功能2：-a 解析LNK并记录EXE路径
+    // 功能2：-a 添加记录（解析LNK+存储EXE路径）
     if (opt == L"-a" && argc > 2) {
-        std::wstring lnk_path = argv[2];       // LNK快捷方式路径
+        std::wstring lnk_path = argv[2];
         wprintf(L"[INFO] 正在解析LNK文件：%ls\n", lnk_path.c_str());
 
-        // 核心修复：提取真实的EXE路径
+        // 提取真实的EXE路径
         std::wstring exe_path = get_lnk_target_path(lnk_path);
         if (exe_path.empty()) {
             wprintf(L"[ERROR] 解析LNK失败！请检查LNK路径是否正确，或该LNK是否指向有效EXE\n");
@@ -235,28 +275,38 @@ int wmain(int argc, wchar_t* argv[])
         }
         wprintf(L"[INFO] 解析成功，EXE真实路径：%ls\n", exe_path.c_str());
 
-        // 确定文件名（用户自定义 > 从EXE路径提取）
+        // 确定文件名
         std::wstring soft_name;
         if (argc > 3) {
-            soft_name = argv[3]; // 用户自定义文件名（如789）
+            soft_name = argv[3]; // 用户自定义文件名
         }
         else {
-            soft_name = get_file_name(exe_path); // 从EXE路径提取（如Excel）
+            soft_name = get_file_name(exe_path); // 自动提取
             wprintf(L"[INFO] 自动提取文件名：%ls\n", soft_name.c_str());
         }
 
-        // 执行l2e.exe（生成exe）
+        // 执行l2e.exe
         std::wstring cmd = L"l2e.exe \"" + lnk_path + L"\" " + soft_name;
         wprintf(L"[INFO] 执行命令：%ls\n", cmd.c_str());
         _wsystem(cmd.c_str());
 
-        // 写入配置（文件名 + EXE路径）
-        write_soft(soft_name, exe_path);
+        // 添加记录
+        add_soft(soft_name, exe_path);
+        return 0;
+    }
 
+    // 功能3：-d 删除记录（按文件名）
+    if (opt == L"-d" && argc > 2) {
+        std::wstring del_name = argv[2];
+        delete_soft(del_name);
         return 0;
     }
 
     // 无效参数
-    wprintf(L"[ERROR] 无效命令！支持：-a <lnk路径> [文件名] 或 -s\n");
+    wprintf(L"[ERROR] 无效命令！\n");
+    wprintf(L"支持的命令：\n");
+    wprintf(L"  1. 添加记录：sl -a <lnk快捷方式路径> [自定义文件名]\n");
+    wprintf(L"  2. 查看记录：sl -s\n");
+    wprintf(L"  3. 删除记录：sl -d <要删除的文件名>\n");
     return -1;
 }

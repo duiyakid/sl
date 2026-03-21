@@ -7,10 +7,13 @@
 #include <wchar.h>      
 #include <io.h>         
 #include <fcntl.h>      
-#include <shlobj.h>     // 解析LNK快捷方式需要
+#include <shlobj.h>     // 解析LNK/打开路径需要
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib") // CoInitialize需要
+
+// ========== 前置声明（解决函数调用顺序问题） ==========
+std::vector<std::pair<std::wstring, std::wstring>> read_all_soft();
 
 // ========== 工具函数 ==========
 // 1. 正确提取LNK快捷方式的真实EXE目标路径
@@ -90,6 +93,46 @@ std::wstring pad_space(const std::wstring& str, int len) {
     return res;
 }
 
+// 4. 根据文件名查找对应的EXE路径
+std::wstring find_exe_path_by_name(const std::wstring& name) {
+    if (name.empty()) return L"";
+    std::vector<std::pair<std::wstring, std::wstring>> list = read_all_soft();
+    for (auto& pair : list) {
+        if (pair.first == name) {
+            return pair.second; // 找到匹配的EXE路径
+        }
+    }
+    return L""; // 未找到
+}
+
+// 5. 打开指定路径（启动EXE或打开文件夹）- 修复类型转换警告
+// 5. 只打开路径所在文件夹（不运行EXE）
+bool open_path(const std::wstring& path) {
+    if (path.empty()) {
+        wprintf(L"[ERROR] 路径为空，无法打开文件夹！\n");
+        return false;
+    }
+
+    // 截取到所在文件夹
+    size_t last_slash = path.find_last_of(L"\\/");
+    if (last_slash == std::wstring::npos) {
+        wprintf(L"[ERROR] 无法解析所在文件夹：%ls\n", path.c_str());
+        return false;
+    }
+
+    std::wstring folder = path.substr(0, last_slash);
+    HINSTANCE hInst = ShellExecuteW(NULL, L"open", folder.c_str(), NULL, NULL, SW_SHOWNORMAL);
+
+    if ((UINT)hInst > 32) {
+        wprintf(L"[✅] 已打开所在文件夹：%ls\n", folder.c_str());
+        return true;
+    }
+    else {
+        wprintf(L"[❌] 打开文件夹失败：%ls\n", folder.c_str());
+        return false;
+    }
+}
+
 // ========== 配置文件核心 ==========
 // 配置文件路径：当前目录sl_config.txt
 std::wstring get_config_path() {
@@ -108,7 +151,7 @@ bool check_config() {
     return true;
 }
 
-// 读取所有记录（供添加/删除/查看使用）
+// 读取所有记录（供添加/删除/查看/查找使用）
 std::vector<std::pair<std::wstring, std::wstring>> read_all_soft() {
     std::vector<std::pair<std::wstring, std::wstring>> list;
     std::wstring cfg = get_config_path();
@@ -170,8 +213,8 @@ bool add_soft(const std::wstring& name, const std::wstring& exe_path) {
     return false;
 }
 
-// 删除记录：按文件名删除
-bool delete_soft(const std::wstring& name) {
+// 删除记录：按文件名删除（-r 命令）
+bool remove_soft(const std::wstring& name) {
     if (name.empty()) {
         wprintf(L"[ERROR] 请指定要删除的文件名！\n");
         return false;
@@ -204,8 +247,8 @@ bool delete_soft(const std::wstring& name) {
     return false;
 }
 
-// 表格化展示所有记录
-void show_soft_table() {
+// 表格化展示所有记录（-l 命令）
+void list_soft_table() {
     std::vector<std::pair<std::wstring, std::wstring>> list = read_all_soft();
 
     wprintf(L"\n==================== 已记录的软件列表 ====================\n");
@@ -249,20 +292,45 @@ int wmain(int argc, wchar_t* argv[])
         wprintf(L"[ERROR] 缺少命令参数！\n");
         wprintf(L"支持的命令：\n");
         wprintf(L"  1. 添加记录：sl -a <lnk快捷方式路径> [自定义文件名]\n");
-        wprintf(L"  2. 查看记录：sl -s\n");
-        wprintf(L"  3. 删除记录：sl -d <要删除的文件名>\n");
+        wprintf(L"  2. 查看列表：sl -l\n");
+        wprintf(L"  3. 打开路径：sl -s <要打开的文件名>\n");
+        wprintf(L"  4. 删除记录：sl -r <要删除的文件名>\n");
         return -1;
     }
 
     std::wstring opt = argv[1];
 
-    // 功能1：-s 查看表格化记录
-    if (opt == L"-s") {
-        show_soft_table();
+    // 功能1：-l 查看软件列表（原-s功能）
+    if (opt == L"-l") {
+        list_soft_table();
         return 0;
     }
 
-    // 功能2：-a 添加记录（解析LNK+存储EXE路径）
+    // 功能2：-s 打开指定文件名的EXE路径（新增核心功能）
+    if (opt == L"-s" && argc > 2) {
+        std::wstring open_name = argv[2];
+        wprintf(L"[INFO] 正在查找文件名「%ls」对应的路径...\n", open_name.c_str());
+
+        // 查找EXE路径
+        std::wstring exe_path = find_exe_path_by_name(open_name);
+        if (exe_path.empty()) {
+            wprintf(L"[❌] 未找到文件名「%ls」的记录！\n", open_name.c_str());
+            return -1;
+        }
+
+        // 打开路径
+        open_path(exe_path);
+        return 0;
+    }
+
+    // 功能3：-r 删除指定文件名的记录（原-d功能）
+    if (opt == L"-r" && argc > 2) {
+        std::wstring del_name = argv[2];
+        remove_soft(del_name);
+        return 0;
+    }
+
+    // 功能4：-a 添加记录（保留原有功能）
     if (opt == L"-a" && argc > 2) {
         std::wstring lnk_path = argv[2];
         wprintf(L"[INFO] 正在解析LNK文件：%ls\n", lnk_path.c_str());
@@ -295,18 +363,12 @@ int wmain(int argc, wchar_t* argv[])
         return 0;
     }
 
-    // 功能3：-d 删除记录（按文件名）
-    if (opt == L"-d" && argc > 2) {
-        std::wstring del_name = argv[2];
-        delete_soft(del_name);
-        return 0;
-    }
-
     // 无效参数
     wprintf(L"[ERROR] 无效命令！\n");
     wprintf(L"支持的命令：\n");
     wprintf(L"  1. 添加记录：sl -a <lnk快捷方式路径> [自定义文件名]\n");
-    wprintf(L"  2. 查看记录：sl -s\n");
-    wprintf(L"  3. 删除记录：sl -d <要删除的文件名>\n");
+    wprintf(L"  2. 查看列表：sl -l\n");
+    wprintf(L"  3. 打开路径：sl -s <要打开的文件名>\n");
+    wprintf(L"  4. 删除记录：sl -r <要删除的文件名>\n");
     return -1;
 }

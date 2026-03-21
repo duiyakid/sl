@@ -281,17 +281,23 @@ void ShowHelp()
 int wmain(int argc, wchar_t* argv[])
 {
     // 检查参数
-    if (argc != 2) {
-        ShowHelp();
-        return 1;
-    }
+    //if (argc != 2) {
+    //    ShowHelp();
+    //    return 1;
+    //}
 
     // 使用命令行参数
     std::wstring lnkPath = argv[1];
     wprintf(L"[DEBUG] Using command line path: %s\n", lnkPath.c_str());
 
     // 第一步：先截取带扩展名的文件名（你原来的代码）
-    std::wstring new_name = lnkPath.substr(lnkPath.find_last_of(L"\\/") + 1);
+	std::wstring new_name;
+    if (argc >= 3) {
+        new_name = argv[2];
+    }
+    else {
+        new_name = lnkPath.substr(lnkPath.find_last_of(L"\\/") + 1);
+    }
     // 第二步：找到最后一个"."的位置，删掉后面的扩展名
     size_t dot_pos = new_name.rfind(L'.');  // 找最后一个点
     if (dot_pos != std::wstring::npos)      // 如果找到点

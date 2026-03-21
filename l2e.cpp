@@ -17,7 +17,27 @@ extern "C" {
     const IID IID_IShellLinkW = {0x000214F9, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
     const IID IID_IPersistFile = {0x0000010b, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
 }
-
+// 获取程序自身的目录（返回std::wstring）
+std::wstring GetExeDir()
+{
+    WCHAR szExePath[MAX_PATH] = { 0 };
+    // 获取当前exe的完整路径
+    DWORD dwRet = GetModuleFileNameW(NULL, szExePath, MAX_PATH);
+    if (dwRet == 0 || dwRet >= MAX_PATH)
+    {
+        wprintf(L"[ERROR] Failed to get exe path (error: %d)\n", GetLastError());
+        return L"";
+    }
+    // 截取路径，去掉exe文件名，只保留目录
+    std::wstring exePath = szExePath;
+    size_t pos = exePath.find_last_of(L"\\/");
+    if (pos == std::wstring::npos)
+    {
+        return L"";
+    }
+    std::wstring exeDir = exePath.substr(0, pos + 1); // 保留末尾的反斜杠
+    return exeDir;
+}
 // 读取lnk的目标路径和参数
 bool GetShortcutInfo(const std::wstring& lnkPath, std::wstring& targetPath, std::wstring& args)
 {
@@ -270,6 +290,12 @@ int wmain(int argc, wchar_t* argv[])
     std::wstring lnkPath = argv[1];
     wprintf(L"[DEBUG] Using command line path: %s\n", lnkPath.c_str());
 
+    // 第一步：先截取带扩展名的文件名（你原来的代码）
+    std::wstring new_name = lnkPath.substr(lnkPath.find_last_of(L"\\/") + 1);
+    // 第二步：找到最后一个"."的位置，删掉后面的扩展名
+    size_t dot_pos = new_name.rfind(L'.');  // 找最后一个点
+    if (dot_pos != std::wstring::npos)      // 如果找到点
+        new_name = new_name.substr(0, dot_pos);  // 只保留点前面的部分
 
 
     // 校验lnk文件是否存在
@@ -282,6 +308,7 @@ int wmain(int argc, wchar_t* argv[])
         return 1;
     }
     wprintf(L"[DEBUG] File exists!\n");
+
 
     // 初始化COM
     CoInitialize(NULL);
@@ -298,15 +325,15 @@ int wmain(int argc, wchar_t* argv[])
     wprintf(L"[INFO] Lnk arguments: %s\n", args.empty() ? L"none" : args.c_str());
 
     // 2. 生成cpp文件（和lnk同名）
-    std::wstring cppPath = L"test_output.cpp";
-    wprintf(L"[DEBUG] Generated cpp path: test_output.cpp\n");
+    std::wstring cppPath = L"tmp.cpp";
+    wprintf(L"[DEBUG] Generated cpp path: tmp.cpp\n");
     if (!GenerateCppFile(targetPath, args, cppPath)) {
         CoUninitialize();
         return 1;
     }
 
     // 3. 编译生成exe（和lnk同名，静默无黑框）
-    std::wstring exePath = L"test_output.exe";
+    std::wstring exePath = new_name+L".exe";
     wprintf(L"[DEBUG] Generated exe path: test_output.exe\n");
     if (!CompileExe(cppPath, exePath)) {
         CoUninitialize();

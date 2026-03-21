@@ -303,7 +303,6 @@ int wmain(int argc, wchar_t* argv[])
     if (dot_pos != std::wstring::npos)      // 如果找到点
         new_name = new_name.substr(0, dot_pos);  // 只保留点前面的部分
 
-
     // 校验lnk文件是否存在
     DWORD attributes = GetFileAttributesW(lnkPath.c_str());
     wprintf(L"[DEBUG] GetFileAttributes returned: %d\n", attributes);
@@ -339,7 +338,7 @@ int wmain(int argc, wchar_t* argv[])
     }
 
     // 3. 编译生成exe（和lnk同名，静默无黑框）
-    std::wstring exePath = new_name+L".exe";
+    std::wstring exePath = L"D:\\Software\\shortcut\\" + new_name + L".exe";
     wprintf(L"[DEBUG] Generated exe path: test_output.exe\n");
     if (!CompileExe(cppPath, exePath)) {
         CoUninitialize();

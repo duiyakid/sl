@@ -1,2 +1,3 @@
 789|D:\Software\VisualStudio\Project Folder\sl\
 887|D:\Software\VisualStudio\Project Folder\sl\
+881|C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE

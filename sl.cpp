@@ -10,37 +10,71 @@
 #include <shlobj.h>     // 解析LNK快捷方式需要
 
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib") // CoInitialize需要
 
 // ========== 工具函数 ==========
-// 1. 提取LNK快捷方式的真实EXE目标路径
+// 1. 修复：正确提取LNK快捷方式的真实EXE目标路径
 std::wstring get_lnk_target_path(const std::wstring& lnk_path) {
-    WCHAR szTargetPath[MAX_PATH] = { 0 };
+    WCHAR szTargetPath[MAX_PATH * 2] = { 0 }; // 扩大缓冲区，避免路径截断
     IShellLinkW* pShellLink = NULL;
     IPersistFile* pPersistFile = NULL;
-    HRESULT hr = CoInitialize(NULL);
+    HRESULT hr = CoInitialize(NULL); // 初始化COM库（必须）
 
-    // 创建IShellLink实例
-    hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLinkW, (void**)&pShellLink);
-    if (SUCCEEDED(hr)) {
-        // 绑定到LNK文件
-        hr = pShellLink->QueryInterface(IID_IPersistFile, (void**)&pPersistFile);
-        if (SUCCEEDED(hr)) {
-            hr = pPersistFile->Load(lnk_path.c_str(), STGM_READ);
-            if (SUCCEEDED(hr)) {
-                // 获取LNK指向的真实目标路径
-                pShellLink->GetPath(szTargetPath, MAX_PATH, NULL, SLGP_UNCPRIORITY);
-            }
-            pPersistFile->Release();
-        }
-        pShellLink->Release();
+    if (FAILED(hr)) {
+        wprintf(L"[ERROR] COM库初始化失败！\n");
+        return L"";
     }
+
+    // 1. 创建IShellLink实例
+    hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
+        IID_IShellLinkW, (LPVOID*)&pShellLink);
+    if (FAILED(hr)) {
+        wprintf(L"[ERROR] 创建ShellLink实例失败！错误码：%08X\n", hr);
+        CoUninitialize();
+        return L"";
+    }
+
+    // 2. 查询IPersistFile接口（用于加载LNK文件）
+    hr = pShellLink->QueryInterface(IID_IPersistFile, (LPVOID*)&pPersistFile);
+    if (FAILED(hr)) {
+        wprintf(L"[ERROR] 获取PersistFile接口失败！错误码：%08X\n", hr);
+        pShellLink->Release();
+        CoUninitialize();
+        return L"";
+    }
+
+    // 3. 加载LNK文件（必须用WCHAR，支持中文路径）
+    hr = pPersistFile->Load(lnk_path.c_str(), STGM_READ);
+    if (FAILED(hr)) {
+        wprintf(L"[ERROR] 加载LNK文件失败！请检查路径是否正确，错误码：%08X\n", hr);
+        pPersistFile->Release();
+        pShellLink->Release();
+        CoUninitialize();
+        return L"";
+    }
+
+    // 4. 修复核心：获取完整的目标路径（SLGP_RAWPATH=原始路径，不简化）
+    hr = pShellLink->GetPath(szTargetPath, MAX_PATH * 2, NULL, SLGP_RAWPATH);
+    if (FAILED(hr)) {
+        wprintf(L"[ERROR] 提取LNK目标路径失败！错误码：%08X\n", hr);
+        pPersistFile->Release();
+        pShellLink->Release();
+        CoUninitialize();
+        return L"";
+    }
+
+    // 释放资源
+    pPersistFile->Release();
+    pShellLink->Release();
     CoUninitialize();
 
+    // 返回真实的EXE路径
     return szTargetPath;
 }
 
 // 2. 提取文件名（从EXE路径/自定义名称）
 std::wstring get_file_name(const std::wstring& path) {
+    if (path.empty()) return L"";
     std::wstring new_name = path.substr(path.find_last_of(L"\\/") + 1);
     size_t dot_pos = new_name.rfind(L'.');
     if (dot_pos != std::wstring::npos)
@@ -48,7 +82,7 @@ std::wstring get_file_name(const std::wstring& path) {
     return new_name;
 }
 
-// 3. 补空格对齐（保证表格美观）
+// 3. 补空格对齐（表格美观）
 std::wstring pad_space(const std::wstring& str, int len) {
     std::wstring res = str;
     while (res.size() < len) {
@@ -79,6 +113,11 @@ bool check_config() {
 
 // 写入记录：存储「文件名|EXE目标路径」
 bool write_soft(const std::wstring& name, const std::wstring& exe_path) {
+    if (name.empty() || exe_path.empty()) {
+        wprintf(L"[ERROR] 文件名或EXE路径为空，写入失败！\n");
+        return false;
+    }
+
     std::wstring cfg = get_config_path();
     // 读取原有记录（去重）
     std::vector<std::pair<std::wstring, std::wstring>> list;
@@ -131,16 +170,16 @@ void show_soft_table() {
 
     // 表格化展示
     wprintf(L"\n==================== 已记录的软件列表 ====================\n");
-    // 表头：序号  文件名    EXE路径（对齐）
+    // 表头：序号  文件名          EXE路径
     wprintf(L"%ls\t%ls\t%ls\n",
         pad_space(L"序号", 2).c_str(),       // 序号列（占2位）
-        pad_space(L"文件名", 8).c_str(),     // 文件名列（占8位）
+        pad_space(L"文件名", 10).c_str(),    // 文件名列（占10位）
         L"EXE路径");                         // EXE路径列
 
     if (list.empty()) {
         wprintf(L"%ls\t%ls\t%ls\n",
             pad_space(L"-", 2).c_str(),
-            pad_space(L"暂无记录", 8).c_str(),
+            pad_space(L"暂无记录", 10).c_str(),
             L"-");
     }
     else {
@@ -149,7 +188,7 @@ void show_soft_table() {
             std::wstring idx = std::to_wstring(i + 1);
             wprintf(L"%ls\t%ls\t%ls\n",
                 pad_space(idx, 2).c_str(),       // 序号
-                pad_space(list[i].first, 8).c_str(),  // 文件名（对齐）
+                pad_space(list[i].first, 10).c_str(),  // 文件名（对齐）
                 list[i].second.c_str());         // EXE路径
         }
     }
@@ -186,15 +225,24 @@ int wmain(int argc, wchar_t* argv[])
     // 功能2：-a 解析LNK并记录EXE路径
     if (opt == L"-a" && argc > 2) {
         std::wstring lnk_path = argv[2];       // LNK快捷方式路径
-        std::wstring exe_path = get_lnk_target_path(lnk_path); // 提取EXE真实路径
+        wprintf(L"[INFO] 正在解析LNK文件：%ls\n", lnk_path.c_str());
+
+        // 核心修复：提取真实的EXE路径
+        std::wstring exe_path = get_lnk_target_path(lnk_path);
+        if (exe_path.empty()) {
+            wprintf(L"[ERROR] 解析LNK失败！请检查LNK路径是否正确，或该LNK是否指向有效EXE\n");
+            return -1;
+        }
+        wprintf(L"[INFO] 解析成功，EXE真实路径：%ls\n", exe_path.c_str());
 
         // 确定文件名（用户自定义 > 从EXE路径提取）
         std::wstring soft_name;
         if (argc > 3) {
-            soft_name = argv[3]; // 用户自定义文件名（如512）
+            soft_name = argv[3]; // 用户自定义文件名（如789）
         }
         else {
             soft_name = get_file_name(exe_path); // 从EXE路径提取（如Excel）
+            wprintf(L"[INFO] 自动提取文件名：%ls\n", soft_name.c_str());
         }
 
         // 执行l2e.exe（生成exe）

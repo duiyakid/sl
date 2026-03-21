@@ -136,7 +136,16 @@ bool open_path(const std::wstring& path) {
 // ========== 配置文件核心 ==========
 // 配置文件路径：当前目录sl_config.txt
 std::wstring get_config_path() {
-    return L"sl_config.txt";
+    // 1. 获取sl.exe自身的绝对路径
+    WCHAR szExePath[MAX_PATH] = { 0 };
+    GetModuleFileNameW(NULL, szExePath, MAX_PATH);
+
+    // 2. 截取exe所在目录（去掉exe文件名）
+    std::wstring exe_full_path = szExePath;
+    std::wstring exe_dir = exe_full_path.substr(0, exe_full_path.find_last_of(L"\\/"));
+
+    // 3. 拼接同目录下的sl_config.txt
+    return exe_dir + L"\\sl_config.txt";
 }
 
 // 检查并创建配置文件

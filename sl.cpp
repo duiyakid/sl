@@ -17,12 +17,53 @@ std::wstring get_file_name(std::wstring path) {
         new_name = new_name.substr(0, dot_pos);  // 只保留点前面的部分
     return new_name;
 }
+
+// ========== 新增：获取配置文件路径 ==========
+// 配置文件和sl.exe同目录，名称为sl_config.ini
+std::wstring get_config_path() {
+    // 直接返回当前目录的sl_config.ini（无需找exe路径）
+    return L"sl_config.ini";
+}
+
+bool check_and_create_config() {
+    std::wstring configPath = get_config_path();
+
+    // 1. 检查文件是否存在（当前目录）
+    DWORD fileAttr = GetFileAttributesW(configPath.c_str());
+    if (fileAttr != INVALID_FILE_ATTRIBUTES) {
+        wprintf(L"[INFO] 配置文件已存在（当前目录）：%ls\n", configPath.c_str());
+        return true;
+    }
+
+    // 2. 文件不存在，创建空配置文件（当前目录）
+    HANDLE hFile = CreateFileW(
+        configPath.c_str(),          // 当前目录的sl_config.ini
+        GENERIC_WRITE,               // 写入权限
+        FILE_SHARE_READ,             // 允许其他程序读取
+        NULL,                        // 默认安全属性
+        CREATE_NEW,                  // 仅新建（避免覆盖）
+        FILE_ATTRIBUTE_NORMAL,       // 普通文件
+        NULL
+    );
+
+    if (hFile == INVALID_HANDLE_VALUE) {
+        wprintf(L"[ERROR] 新建配置文件失败（当前目录）！错误码：%d\n", GetLastError());
+        return false;
+    }
+
+    // 3. 关闭文件句柄
+    CloseHandle(hFile);
+    wprintf(L"[INFO] 配置文件已新建（当前目录）：%ls\n", configPath.c_str());
+    return true;
+}
 // ========== wmain入口 ==========
 int wmain(int argc, wchar_t* argv[])
 {
     SetConsoleOutputCP(CP_UTF8);                  // 控制台输出代码页设为UTF-8
     int rec = _setmode(_fileno(stdout), _O_U16TEXT);        // 标准输出设为宽字符模式
     
+    check_and_create_config();
+
     if (argc < 2) {
         wprintf(L"[ERROR] 缺少命令参数！\n");
         wprintf(L"用法：\n");

@@ -2,110 +2,57 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <stdexcept>
+#include <stdio.h>      // 基础输入输出
+#include <wchar.h>      // 宽字符处理
+#include <io.h>         // _setmode 函数
+#include <fcntl.h>      // _O_U16TEXT 宏
 
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "user32.lib")
+std::wstring get_file_name(std::wstring path) {
 
-// 修复结构体定义：添加结构体名，成员改为宽字符（适配wstring）
-struct Para {
-    std::wstring target;  // 改为wstring，兼容中文/宽字符
-    std::wstring args;
-};
-
-// ========== 核心业务逻辑（原wmain内容，抽离为函数） ==========
-int MainLogic(int argc, wchar_t* argv[])
-{
-    // 解决MinGW下wcout不输出的问题
-    std::ios::sync_with_stdio(false);
-    std::wcin.tie(nullptr);
-    // 设置控制台UTF-8编码，解决中文乱码
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-
-    // ========== 1. 修复参数校验逻辑 ==========
-    // 原逻辑argc判断错误：-a命令至少需要 程序名 + -a + lnk路径（3个参数）
-    if (argc < 3) {
-        std::wcout << L"Usage: sl -a <shortcut.lnk> [new_exe_name]" << std::endl;
-        return 1;
-    }
-
-    // ========== 2. 解析命令参数 ==========
-    std::wstring opt = argv[1];       // 命令（如 -a）
-    std::wstring para = argv[2];      // lnk路径
-    std::wstring new_name;            // 生成的exe名字
-
-    // 解析新名字：有传则用传的，无传则从lnk路径截取
-    if (argc >= 4) {
-        new_name = argv[3];
-    }
-    else {
-        // 截取lnk路径的文件名（去掉目录）
-        new_name = para.substr(para.find_last_of(L"\\/") + 1);
-        // 去掉扩展名（.lnk）
-        size_t dot_pos = new_name.rfind(L'.');
-        if (dot_pos != std::wstring::npos)
-            new_name = new_name.substr(0, dot_pos);
-    }
-
-    // ========== 3. 拼接命令（修复逻辑顺序：先拼cmd再调用_wsystem） ==========
-    std::wstring cmd;
-    if (opt == L"-a") {
-        cmd = L"l2e.exe ";          // 调用你的lnk2exe工具
-        cmd += L"\"";               // 路径加引号（兼容空格）
-        cmd += para;                // lnk路径
-        cmd += L"\"";               // 闭合引号
-        if (argc >= 4) {
-            cmd += L" ";            // 空格分隔
-            cmd += new_name;        // 新exe名字
-        }
-    }
-    else {
-        std::wcout << L"Unknown option: " << opt << std::endl;
-        std::wcout << L"Only support: -a" << std::endl;
-        return 1;
-    }
-
-    // ========== 4. 执行命令并输出 ==========
-    std::wcout << L"Executing command: " << cmd << std::endl;
-    int ret = _wsystem(cmd.c_str()); // 执行命令（需确保l2e.exe在PATH或同目录）
-
-    // 输出执行结果
-    if (ret == 0) {
-        std::wcout << L"Command executed successfully!" << std::endl;
-    }
-    else {
-        std::wcerr << L"Command failed! Error code: " << ret << std::endl;
-    }
-
-    return 0;
+    std::wstring new_name = path.substr(path.find_last_of(L"\\/") + 1);
+    // 第二步：找到最后一个"."的位置，删掉后面的扩展名
+    size_t dot_pos = new_name.rfind(L'.');  // 找最后一个点
+    if (dot_pos != std::wstring::npos)      // 如果找到点
+        new_name = new_name.substr(0, dot_pos);  // 只保留点前面的部分
+    return new_name;
 }
-
-// ========== wmain入口（VS/MinGW加参数后调用） ==========
+// ========== wmain入口 ==========
 int wmain(int argc, wchar_t* argv[])
 {
-    return MainLogic(argc, argv);
-}
-
-// ========== WinMain入口（MinGW编译GUI程序时调用，完全模仿l2e.cpp） ==========
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-{
-    // 打印原始命令行
-    wchar_t* cmdLine = GetCommandLineW();
-    std::wprintf(L"[DEBUG] Raw command line: %s\n", cmdLine);
-
-    int argc;
-    wchar_t** argv = CommandLineToArgvW(cmdLine, &argc);
-    if (argv) {
-        // 打印解析后的参数
-        std::wprintf(L"[DEBUG] Parsed argc: %d\n", argc);
-        for (int i = 0; i < argc; i++) {
-            std::wprintf(L"[DEBUG] Parsed argv[%d]: %s\n", i, argv[i]);
-        }
-
-        int result = MainLogic(argc, argv); // 调用核心逻辑
-        LocalFree(argv);
-        return result;
+    SetConsoleOutputCP(CP_UTF8);                  // 控制台输出代码页设为UTF-8
+    int rec = _setmode(_fileno(stdout), _O_U16TEXT);        // 标准输出设为宽字符模式
+    
+    if (argc < 2) {
+        wprintf(L"[ERROR] 缺少命令参数！\n");
+        wprintf(L"用法：\n");
+        wprintf(L"  sl2 -a <lnk路径> [新exe名]  # 生成exe\n");
+        wprintf(L"  sl2 -s                      # 查看记录\n");
+        return -1;
     }
-    return 1;
+
+    std::wstring opt;
+    std::wstring para;
+    opt = argv[1];
+    if(argc>2) para = argv[2];
+    std::wstring new_name;
+    std::wstring cmd;
+    if (opt == L"-a" && argc>2) {
+        cmd += L"l2e.exe \"";
+        cmd += para;
+        cmd += L"\" ";
+        if (argc > 3) {
+            new_name = argv[3];
+        }
+        else {
+            new_name = get_file_name(para);
+        }
+        cmd += new_name;
+        _wsystem(cmd.c_str());
+    }
+    
+        
+    return 0;
+    
 }
+

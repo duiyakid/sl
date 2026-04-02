@@ -70,7 +70,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    const std::wstring targetPath = L"C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE";
+    const std::wstring targetPath = L"D:\\Software\\Bandicam\\Bandicam 4.6.2.1699\\BandicamPortable\\Bandicam_Portable.exe";
     const std::wstring arguments = L"";
 
     if (targetPath.empty()) {

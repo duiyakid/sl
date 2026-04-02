@@ -1,1 +1,3 @@
-123|C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE
+﻿123|C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE
+okp|D:\Software\Bandicam\Bandicam 4.6.2.1699\BandicamPortable\Bandicam_Portable.exe
+okk|D:\Software\Bandicam\Bandicam 4.6.2.1699\BandicamPortable\Bandicam_Portable.exe

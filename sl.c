@@ -28,7 +28,7 @@ BOOL GetLnkTargetPath(const WCHAR* lnkPath, WCHAR* targetPath, int maxTarget)
     IPersistFile* ppf = NULL;
     HRESULT hr;
 
-    CoInitialize(NULL);
+    HRESULT REss = CoInitialize(NULL);
 
     hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void**)&psl);
     if (FAILED(hr)) goto fail;
@@ -217,7 +217,7 @@ void OpenFolder(const WCHAR* path)
 int wmain(int argc, WCHAR** argv)
 {
     SetConsoleOutputCP(CP_UTF8);
-    _setmode(_fileno(stdout), _O_U16TEXT);
+    int res = _setmode(_fileno(stdout), _O_U16TEXT);
 
     LoadConfig();
 

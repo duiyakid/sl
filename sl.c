@@ -20,7 +20,16 @@ SoftRecord g_softs[MAX_RECORDS];
 int g_count = 0;
 
 // ==============================================
-// 1. 解析 LNK 快捷方式获取真实路径（纯 C）
+// 1. 解析 URL 快捷方式（.url）获取网址
+// ==============================================
+BOOL GetUrlTargetPath(const WCHAR* urlPath, WCHAR* targetPath, int maxTarget)
+{
+    return GetPrivateProfileStringW(L"InternetShortcut", L"URL", L"",
+        targetPath, maxTarget, urlPath) > 0;
+}
+
+// ==============================================
+// 2. 解析 LNK 快捷方式（.lnk）获取真实路径
 // ==============================================
 BOOL GetLnkTargetPath(const WCHAR* lnkPath, WCHAR* targetPath, int maxTarget)
 {
@@ -28,9 +37,10 @@ BOOL GetLnkTargetPath(const WCHAR* lnkPath, WCHAR* targetPath, int maxTarget)
     IPersistFile* ppf = NULL;
     HRESULT hr;
 
-    HRESULT REss = CoInitialize(NULL);
+    CoInitialize(NULL);
 
-    hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void**)&psl);
+    hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IShellLinkW, (void**)&psl);
     if (FAILED(hr)) goto fail;
 
     hr = psl->lpVtbl->QueryInterface(psl, &IID_IPersistFile, (void**)&ppf);
@@ -52,7 +62,25 @@ fail:
 }
 
 // ==============================================
-// 2. 从路径提取文件名（不含后缀）
+// 3. 统一接口：自动识别 lnk / url
+// ==============================================
+BOOL GetTargetPath(const WCHAR* filePath, WCHAR* targetPath, int maxTarget)
+{
+    targetPath[0] = 0;
+
+    // 先尝试解析 url
+    if (GetUrlTargetPath(filePath, targetPath, maxTarget))
+        return TRUE;
+
+    // 再尝试解析 lnk
+    if (GetLnkTargetPath(filePath, targetPath, maxTarget))
+        return TRUE;
+
+    return FALSE;
+}
+
+// ==============================================
+// 4. 从路径提取文件名（不含后缀）
 // ==============================================
 void GetFileNameFromPath(const WCHAR* path, WCHAR* name, int maxName)
 {
@@ -67,7 +95,7 @@ void GetFileNameFromPath(const WCHAR* path, WCHAR* name, int maxName)
 }
 
 // ==============================================
-// 3. 获取 exe 所在目录 + 配置文件路径
+// 5. 获取 exe 所在目录 + 配置文件路径
 // ==============================================
 void GetConfigPath(WCHAR* cfgPath, int maxLen)
 {
@@ -81,7 +109,7 @@ void GetConfigPath(WCHAR* cfgPath, int maxLen)
 }
 
 // ==============================================
-// 4. 加载配置文件到内存
+// 6. 加载配置文件到内存
 // ==============================================
 void LoadConfig()
 {
@@ -112,7 +140,7 @@ void LoadConfig()
 }
 
 // ==============================================
-// 5. 保存配置
+// 7. 保存配置
 // ==============================================
 void SaveConfig()
 {
@@ -130,7 +158,7 @@ void SaveConfig()
 }
 
 // ==============================================
-// 6. 根据名称查找路径
+// 8. 根据名称查找路径
 // ==============================================
 const WCHAR* FindExePath(const WCHAR* name)
 {
@@ -143,7 +171,7 @@ const WCHAR* FindExePath(const WCHAR* name)
 }
 
 // ==============================================
-// 7. 添加/覆盖记录
+// 9. 添加/覆盖记录
 // ==============================================
 void AddRecord(const WCHAR* name, const WCHAR* path)
 {
@@ -165,7 +193,7 @@ void AddRecord(const WCHAR* name, const WCHAR* path)
 }
 
 // ==============================================
-// 8. 删除记录
+// 10. 删除记录
 // ==============================================
 BOOL RemoveRecord(const WCHAR* name)
 {
@@ -184,26 +212,34 @@ BOOL RemoveRecord(const WCHAR* name)
 }
 
 // ==============================================
-// 9. 列出所有记录
+// 11. 列出所有记录
 // ==============================================
 void ListRecords()
 {
-    wprintf(L"\n==== 已记录软件 ====\n");
+    wprintf(L"\n==== 已记录软件/网址 ====\n");
     for (int i = 0; i < g_count; i++)
     {
         wprintf(L"[%d] %-12s -> %s\n", i + 1, g_softs[i].name, g_softs[i].path);
     }
-    wprintf(L"=====================\n");
+    wprintf(L"==========================\n");
 }
 
 // ==============================================
-// 10. 打开所在文件夹
+// 12. 打开所在文件夹 或 直接打开网址
 // ==============================================
-void OpenFolder(const WCHAR* path)
+void OpenTarget(const WCHAR* path)
 {
+    // 如果是网址，直接打开
+    if (wcsstr(path, L"http://") || wcsstr(path, L"https://"))
+    {
+        ShellExecuteW(0, L"open", path, 0, 0, SW_SHOWNORMAL);
+        wprintf(L"已打开网址：%s\n", path);
+        return;
+    }
+
+    // 如果是文件，打开文件夹
     WCHAR folder[MAX_PATH];
     wcsncpy_s(folder, MAX_PATH, path, _TRUNCATE);
-
     WCHAR* last = wcsrchr(folder, L'\\');
     if (last) *last = 0;
 
@@ -212,22 +248,22 @@ void OpenFolder(const WCHAR* path)
 }
 
 // ==============================================
-// 主函数：纯 wmain，无 WinMain
+// 主函数
 // ==============================================
 int wmain(int argc, WCHAR** argv)
 {
     SetConsoleOutputCP(CP_UTF8);
-    int res = _setmode(_fileno(stdout), _O_U16TEXT);
+    _setmode(_fileno(stdout), _O_U16TEXT);
 
     LoadConfig();
 
     if (argc < 2)
     {
         wprintf(L"用法：\n");
-        wprintf(L"  sl -a <xxx.lnk> [name]    添加并生成exe\n");
-        wprintf(L"  sl -l                    列表\n");
-        wprintf(L"  sl -s <name>              打开目录\n");
-        wprintf(L"  sl -r <name>              删除\n");
+        wprintf(L"  sl -a <xxx.lnk/xxx.url> [name]    添加快捷方式\n");
+        wprintf(L"  sl -l                            列表\n");
+        wprintf(L"  sl -s <name>                     打开目录/网址\n");
+        wprintf(L"  sl -r <name>                     删除\n");
         return 0;
     }
 
@@ -240,11 +276,11 @@ int wmain(int argc, WCHAR** argv)
         return 0;
     }
 
-    // 打开目录
+    // 打开目录/网址
     if (_wcsicmp(opt, L"-s") == 0 && argc >= 3)
     {
         const WCHAR* path = FindExePath(argv[2]);
-        if (path) OpenFolder(path);
+        if (path) OpenTarget(path);
         else wprintf(L"未找到：%s\n", argv[2]);
         return 0;
     }
@@ -259,13 +295,13 @@ int wmain(int argc, WCHAR** argv)
         return 0;
     }
 
-    // 添加 + 调用 l2e
+    // 添加：支持 lnk + url
     if (_wcsicmp(opt, L"-a") == 0 && argc >= 3)
     {
         WCHAR target[MAX_PATH] = { 0 };
-        if (!GetLnkTargetPath(argv[2], target, MAX_PATH))
+        if (!GetTargetPath(argv[2], target, MAX_PATH))
         {
-            wprintf(L"解析lnk失败！\n");
+            wprintf(L"解析快捷方式失败！\n");
             return 1;
         }
 
@@ -273,9 +309,9 @@ int wmain(int argc, WCHAR** argv)
         if (argc >= 4)
             wcsncpy_s(name, _countof(name), argv[3], _TRUNCATE);
         else
-            GetFileNameFromPath(target, name, _countof(name));
+            GetFileNameFromPath(argv[2], name, _countof(name));
 
-        // 调用 l2e.exe
+        // 调用 l2e.exe 生成 exe
         WCHAR cmd[4096];
         swprintf_s(cmd, _countof(cmd), L"l2e.exe \"%s\" %s", argv[2], name);
         _wsystem(cmd);
